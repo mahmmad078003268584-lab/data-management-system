@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نظام إدارة البيانات المتطور</title>
+    <style>
+        :root { --primary: #2c3e50; --accent: #2980b9; --success: #27ae60; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; margin: 0; padding: 20px; color: #333; }
+        .card { background: white; padding: 25px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 450px; margin: auto; }
+        h2 { text-align: center; color: var(--primary); margin-bottom: 25px; }
+        .input-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input, select { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+        .note-text { font-size: 0.8em; color: #7f8c8d; margin-top: 4px; display: block; }
+        .main-btn { width: 100%; padding: 14px; background: var(--success); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 1.1em; }
+
+        /* لوحات الإعدادات والتفاصيل */
+        #settings-panel, #details-panel { display: none; position: fixed; top: 5%; left: 5%; right: 5%; bottom: 5%; background: white; border-radius: 15px; padding: 25px; z-index: 1000; box-shadow: 0 0 40px rgba(0,0,0,0.4); overflow-y: auto; }
+        .overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 999; }
+
+        /* أدوات الفرز والتصنيف */
+        .controls { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+        .controls select, .controls input { flex: 1; min-width: 120px; padding: 8px; font-size: 0.9em; }
+
+        .data-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .data-table th, .data-table td { border: 1px solid #eee; padding: 12px; text-align: right; cursor: pointer; }
+        .data-table tr:hover { background: #f9f9f9; }
+        
+        .admin-btn { position: fixed; bottom: 5px; right: 5px; width: 15px; height: 15px; background: transparent; border: none; cursor: pointer; }
+        .field-item { background: #fcfcfc; border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 8px; }
+        .close-btn { background: #e74c3c; color: white; border: none; padding: 12px; border-radius: 8px; width: 100%; cursor: pointer; margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="card" id="main-view">
+    <h2 id="display-title">محمد حسين محمد</h2>
+    <div id="fields-container"></div>
+    <button class="main-btn" onclick="collectAndSave()">حفظ البيانات</button>
+</div>
+
+<button class="admin-btn" onclick="checkAuth()"></button>
+
+<div class="overlay" id="blur-bg" onclick="hidePanels()"></div>
+
+<div id="settings-panel">
+    <h3>⚙️ لوحة التحكم والبيانات</h3>
+    
+    <div style="background: #ebf2f7; padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+        <h4>تخصيص الواجهة</h4>
+        <label>اسم الموقع:</label>
+        <input type="text" id="site-title-edit" onchange="updateConfig()">
+        <button onclick="addField()" style="margin-top:10px; background:var(--accent); color:white; border:none; padding:8px; border-radius:5px;">+ إضافة حقل جديد</button>
+        <div id="fields-management" style="margin-top:10px;"></div>
+    </div>
+
+    <h4>البيانات المسجلة</h4>
+    <div class="controls">
+        <input type="text" id="searchBox" placeholder="بحث بالاسم..." oninput="renderRecords()">
+        <select id="sortOrder" onchange="renderRecords()">
+            <option value="newest">الأحدث أولاً</option>
+            <option value="oldest">الأقدم أولاً</option>
+            <option value="alpha">أبجدياً (أ-ي)</option>
+        </select>
+    </div>
+
+    <table class="data-table">
+        <thead>
+            <tr style="background:#f4f4f4">
+                <th>الاسم</th>
+                <th>التاريخ والوقت</th>
+            </tr>
+        </thead>
+        <tbody id="records-body"></tbody>
+    </table>
+
+    <button class="close-btn" onclick="hidePanels()">إغلاق وحفظ التغييرات</button>
+</div>
+
+<div id="details-panel">
+    <h3>📋 التفاصيل الكاملة</h3>
+    <div id="full-info-content"></div>
+    <button class="close-btn" onclick="document.getElementById('details-panel').style.display='none'">رجوع للبيانات</button>
+</div>
+
+<!-- Supabase SDK -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<script>
+    // ====== إعداد Supabase ======
+    const SUPABASE_URL = 'https://xwatjqcautsifmviixwr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh3YXRqcWNhdXRzaWZtdmlpeHdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjUxMDcsImV4cCI6MjA5MzQ0MTEwN30.dLcZSX1V94vyn8vdQDmNcnx3E-teP0nMQC8-bJJGwDQ';
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // الإعدادات المبدئية
+    let appConfig = JSON.parse(localStorage.getItem('appConfig_v2')) || {
+        title: "محمد حسين محمد",
+        fields: [
+            { id: 1, label: "الاسم", note: "" },
+            { id: 2, label: "اسم الأب", note: "" },
+            { id: 3, label: "اسم الجد", note: "" },
+            { id: 4, label: "اسم الأم الثلاثي", note: "يرجى كتابة الاسم كما في الهوية" },
+            { id: 5, label: "البريد", note: "" },
+            { id: 6, label: "رقم الهاتف", note: "" }
+        ]
+    };
+
+    let savedRecords = JSON.parse(localStorage.getItem('appRecords_v2')) || [];
+
+    window.onload = init;
+
+    async function init() {
+        // تحميل الإعدادات من Supabase
+        await loadConfigFromSupabase();
+        // تحميل السجلات من Supabase
+        await loadRecordsFromSupabase();
+        renderUserInterface();
+        document.getElementById('site-title-edit').value = appConfig.title;
+    }
+
+    // ====== دوال Supabase ======
+    async function loadConfigFromSupabase() {
+        try {
+            const { data, error } = await supabase
+                .from('app_config')
+                .select('*')
+                .order('id', { ascending: false })
+                .limit(1);
+            
+            if (!error && data && data.length > 0) {
+                appConfig = data[0].config_data;
+                localStorage.setItem('appConfig_v2', JSON.stringify(appConfig));
+            }
+        } catch (e) {
+            console.log('تعذر تحميل الإعدادات من السحابة، يتم استخدام البيانات المحلية');
+        }
+    }
+
+    async function saveConfigToSupabase() {
+        try {
+            // حذف الإعداد القديم وإدراج الجديد
+            await supabase.from('app_config').delete().neq('id', 0);
+            await supabase.from('app_config').insert({ config_data: appConfig });
+        } catch (e) {
+            console.log('تعذر حفظ الإعدادات في السحابة');
+        }
+    }
+
+    async function loadRecordsFromSupabase() {
+        try {
+            const { data, error } = await supabase
+                .from('app_records')
+                .select('*')
+                .order('created_at', { ascending: false });
+            
+            if (!error && data) {
+                savedRecords = data.map(r => ({
+                    id: r.id,
+                    date: r.date,
+                    formattedDate: r.formatted_date,
+                    values: r.values
+                }));
+                localStorage.setItem('appRecords_v2', JSON.stringify(savedRecords));
+            }
+        } catch (e) {
+            console.log('تعذر تحميل السجلات من السحابة، يتم استخدام البيانات المحلية');
+        }
+    }
+
+    async function saveRecordToSupabase(entry) {
+        try {
+            await supabase.from('app_records').insert({
+                id: entry.id,
+                date: entry.date,
+                formatted_date: entry.formattedDate,
+                values: entry.values
+            });
+        } catch (e) {
+            console.log('تعذر حفظ السجل في السحابة');
+        }
+    }
+
+    // ====== دوال الواجهة (بدون تغيير) ======
+    function renderUserInterface() {
+        document.getElementById('display-title').innerText = appConfig.title;
+        const container = document.getElementById('fields-container');
+        container.innerHTML = '';
+        appConfig.fields.forEach(f => {
+            container.innerHTML += `
+                <div class="input-group">
+                    <label>${f.label}</label>
+                    <input type="text" class="user-input" data-label="${f.label}">
+                    ${f.note ? `<span class="note-text">${f.note}</span>` : ''}
+                </div>
+            `;
+        });
+    }
+
+    async function collectAndSave() {
+        const entry = {
+            id: Date.now(),
+            date: new Date().toISOString(),
+            formattedDate: new Date().toLocaleString('ar-EG'),
+            values: {}
+        };
+        
+        document.querySelectorAll('.user-input').forEach(input => {
+            entry.values[input.dataset.label] = input.value;
+        });
+
+        savedRecords.push(entry);
+        localStorage.setItem('appRecords_v2', JSON.stringify(savedRecords));
+        
+        // حفظ في Supabase
+        await saveRecordToSupabase(entry);
+        
+        alert("تم الحفظ بنجاح");
+        document.querySelectorAll('.user-input').forEach(i => i.value = '');
+    }
+
+    function checkAuth() {
+        if(prompt("كلمة المرور:") === "123456") {
+            document.getElementById('settings-panel').style.display = 'block';
+            document.getElementById('blur-bg').style.display = 'block';
+            renderFieldsManager();
+            renderRecords();
+        }
+    }
+
+    // إدارة الحقول في الإعدادات
+    function renderFieldsManager() {
+        const mgr = document.getElementById('fields-management');
+        mgr.innerHTML = '';
+        appConfig.fields.forEach((f, idx) => {
+            mgr.innerHTML += `
+                <div class="field-item">
+                    <input type="text" value="${f.label}" onchange="editField(${idx}, 'label', this.value)" style="margin-bottom:5px">
+                    <input type="text" value="${f.note}" onchange="editField(${idx}, 'note', this.value)" placeholder="ملاحظة أسفل الحقل" style="font-size:0.8em">
+                    <button onclick="deleteField(${idx})" style="color:red; background:none; border:none; cursor:pointer; margin-top:5px">❌ حذف الحقل</button>
+                </div>
+            `;
+        });
+    }
+
+    function addField() {
+        appConfig.fields.push({ id: Date.now(), label: "حقل جديد", note: "" });
+        updateConfig();
+        renderFieldsManager();
+    }
+
+    function deleteField(idx) {
+        appConfig.fields.splice(idx, 1);
+        updateConfig();
+        renderFieldsManager();
+    }
+
+    function editField(idx, prop, val) {
+        appConfig.fields[idx][prop] = val;
+        updateConfig();
+    }
+
+    async function updateConfig() {
+        appConfig.title = document.getElementById('site-title-edit').value;
+        localStorage.setItem('appConfig_v2', JSON.stringify(appConfig));
+        renderUserInterface();
+        // حفظ الإعدادات في Supabase
+        await saveConfigToSupabase();
+    }
+
+    // فرز وتصنيف وعرض البيانات
+    function renderRecords() {
+        const tbody = document.getElementById('records-body');
+        const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+        const sortType = document.getElementById('sortOrder').value;
+
+        let filtered = savedRecords.filter(r => {
+            const firstName = Object.values(r.values)[0] || "";
+            return firstName.toLowerCase().includes(searchTerm);
+        });
+
+        // نظام الفرز
+        filtered.sort((a, b) => {
+            if (sortType === 'newest') return new Date(b.date) - new Date(a.date);
+            if (sortType === 'oldest') return new Date(a.date) - new Date(b.date);
+            if (sortType === 'alpha') {
+                const nameA = Object.values(a.values)[0] || "";
+                const nameB = Object.values(b.values)[0] || "";
+                return nameA.localeCompare(nameB, 'ar');
+            }
+        });
+
+        tbody.innerHTML = '';
+        filtered.forEach(r => {
+            const mainName = Object.values(r.values)[0] || "بدون اسم";
+            const row = document.createElement('tr');
+            row.onclick = () => showFullInfo(r);
+            row.innerHTML = `<td>${mainName}</td><td>${r.formattedDate}</td>`;
+            tbody.appendChild(row);
+        });
+    }
+
+    function showFullInfo(record) {
+        let content = `<p><strong>تاريخ التسجيل:</strong> ${record.formattedDate}</p><hr>`;
+        for (let key in record.values) {
+            content += `<p><strong>${key}:</strong> ${record.values[key] || '---'}</p>`;
+        }
+        document.getElementById('full-info-content').innerHTML = content;
+        document.getElementById('details-panel').style.display = 'block';
+    }
+
+    function hidePanels() {
+        document.querySelectorAll('#settings-panel, #details-panel, #blur-bg').forEach(el => el.style.display = 'none');
+    }
+</script>
+
+</body>
+</html>
