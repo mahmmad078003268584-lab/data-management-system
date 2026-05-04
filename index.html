@@ -85,16 +85,19 @@
 </div>
 
 <!-- Supabase SDK -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js"></script>
 
 <script>
     // ====== إعداد Supabase ======
     const SUPABASE_URL = 'https://xwatjqcautsifmviixwr.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh3YXRqcWNhdXRzaWZtdmlpeHdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjUxMDcsImV4cCI6MjA5MzQ0MTEwN30.dLcZSX1V94vyn8vdQDmNcnx3E-teP0nMQC8-bJJGwDQ';
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    // استخدام supabase.createClient من الـ SDK
+    const { createClient } = window.supabase;
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // الإعدادات المبدئية
-    let appConfig = JSON.parse(localStorage.getItem('appConfig_v2')) || {
+    let appConfig = {
         title: "محمد حسين محمد",
         fields: [
             { id: 1, label: "الاسم", note: "" },
@@ -106,17 +109,29 @@
         ]
     };
 
-    let savedRecords = JSON.parse(localStorage.getItem('appRecords_v2')) || [];
+    let savedRecords = [];
 
     window.onload = init;
 
     async function init() {
-        // تحميل الإعدادات من Supabase
-        await loadConfigFromSupabase();
-        // تحميل السجلات من Supabase
-        await loadRecordsFromSupabase();
+        // تحميل البيانات المحلية أولاً لضمان ظهور الحقول فوراً
+        const localConfig = localStorage.getItem('appConfig_v2');
+        if (localConfig) {
+            appConfig = JSON.parse(localConfig);
+        }
+        const localRecords = localStorage.getItem('appRecords_v2');
+        if (localRecords) {
+            savedRecords = JSON.parse(localRecords);
+        }
+        
         renderUserInterface();
         document.getElementById('site-title-edit').value = appConfig.title;
+
+        // ثم التحديث من Supabase
+        await loadConfigFromSupabase();
+        await loadRecordsFromSupabase();
+        renderUserInterface();
+        renderRecords();
     }
 
     // ====== دوال Supabase ======
@@ -133,17 +148,16 @@
                 localStorage.setItem('appConfig_v2', JSON.stringify(appConfig));
             }
         } catch (e) {
-            console.log('تعذر تحميل الإعدادات من السحابة، يتم استخدام البيانات المحلية');
+            console.error('Error loading config:', e);
         }
     }
 
     async function saveConfigToSupabase() {
         try {
-            // حذف الإعداد القديم وإدراج الجديد
             await supabase.from('app_config').delete().neq('id', 0);
             await supabase.from('app_config').insert({ config_data: appConfig });
         } catch (e) {
-            console.log('تعذر حفظ الإعدادات في السحابة');
+            console.error('Error saving config:', e);
         }
     }
 
@@ -164,7 +178,7 @@
                 localStorage.setItem('appRecords_v2', JSON.stringify(savedRecords));
             }
         } catch (e) {
-            console.log('تعذر تحميل السجلات من السحابة، يتم استخدام البيانات المحلية');
+            console.error('Error loading records:', e);
         }
     }
 
@@ -177,11 +191,11 @@
                 values: entry.values
             });
         } catch (e) {
-            console.log('تعذر حفظ السجل في السحابة');
+            console.error('Error saving record:', e);
         }
     }
 
-    // ====== دوال الواجهة (بدون تغيير) ======
+    // ====== دوال الواجهة ======
     function renderUserInterface() {
         document.getElementById('display-title').innerText = appConfig.title;
         const container = document.getElementById('fields-container');
@@ -205,30 +219,39 @@
             values: {}
         };
         
+        let hasData = false;
         document.querySelectorAll('.user-input').forEach(input => {
+            if (input.value.trim() !== "") hasData = true;
             entry.values[input.dataset.label] = input.value;
         });
+
+        if (!hasData) {
+            alert("يرجى إدخال البيانات أولاً");
+            return;
+        }
 
         savedRecords.push(entry);
         localStorage.setItem('appRecords_v2', JSON.stringify(savedRecords));
         
-        // حفظ في Supabase
         await saveRecordToSupabase(entry);
         
         alert("تم الحفظ بنجاح");
         document.querySelectorAll('.user-input').forEach(i => i.value = '');
+        renderRecords();
     }
 
     function checkAuth() {
-        if(prompt("كلمة المرور:") === "123456") {
+        const pass = prompt("كلمة المرور:");
+        if(pass === "123456") {
             document.getElementById('settings-panel').style.display = 'block';
             document.getElementById('blur-bg').style.display = 'block';
             renderFieldsManager();
             renderRecords();
+        } else if (pass !== null) {
+            alert("كلمة مرور خاطئة");
         }
     }
 
-    // إدارة الحقول في الإعدادات
     function renderFieldsManager() {
         const mgr = document.getElementById('fields-management');
         mgr.innerHTML = '';
@@ -250,9 +273,11 @@
     }
 
     function deleteField(idx) {
-        appConfig.fields.splice(idx, 1);
-        updateConfig();
-        renderFieldsManager();
+        if (confirm("هل أنت متأكد من حذف هذا الحقل؟")) {
+            appConfig.fields.splice(idx, 1);
+            updateConfig();
+            renderFieldsManager();
+        }
     }
 
     function editField(idx, prop, val) {
@@ -264,22 +289,21 @@
         appConfig.title = document.getElementById('site-title-edit').value;
         localStorage.setItem('appConfig_v2', JSON.stringify(appConfig));
         renderUserInterface();
-        // حفظ الإعدادات في Supabase
         await saveConfigToSupabase();
     }
 
-    // فرز وتصنيف وعرض البيانات
     function renderRecords() {
         const tbody = document.getElementById('records-body');
+        if (!tbody) return;
+        
         const searchTerm = document.getElementById('searchBox').value.toLowerCase();
         const sortType = document.getElementById('sortOrder').value;
 
         let filtered = savedRecords.filter(r => {
-            const firstName = Object.values(r.values)[0] || "";
-            return firstName.toLowerCase().includes(searchTerm);
+            const values = Object.values(r.values).join(" ").toLowerCase();
+            return values.includes(searchTerm);
         });
 
-        // نظام الفرز
         filtered.sort((a, b) => {
             if (sortType === 'newest') return new Date(b.date) - new Date(a.date);
             if (sortType === 'oldest') return new Date(a.date) - new Date(b.date);
